@@ -1,0 +1,4 @@
+{
+  "servicesDirectory": "./src/services",
+  "outputFile": "./types/types.ts"
+}
