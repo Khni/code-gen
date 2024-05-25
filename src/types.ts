@@ -1,12 +1,11 @@
-console.log("ts-type-watcher script started");
+#!/usr/bin/env node
 
 import * as ts from "typescript";
 import * as fs from "fs";
 import * as path from "path";
 
 // Helper function to unwrap Promise type
-function unwrapPromiseType(typeNode: ts.TypeNode): string {
-  const typeText = typeNode.getText();
+function unwrapPromiseType(typeText: string): string {
   const promiseMatch = typeText.match(/^Promise<(.*)>$/);
   if (promiseMatch) {
     return promiseMatch[1];
@@ -14,18 +13,8 @@ function unwrapPromiseType(typeNode: ts.TypeNode): string {
   return typeText;
 }
 
-// Function to extract return type from function signature
-function extractReturnType(
-  node: ts.FunctionLikeDeclarationBase
-): string | null {
-  if (node.type) {
-    return unwrapPromiseType(node.type);
-  }
-  return null;
-}
-
-// Helper function to parse model types from Prisma index.d.ts file
-function parsePrismaModels(indexFilePath: string): Record<string, string> {
+// Helper function to parse model and enum types from Prisma index.d.ts file
+function parsePrismaTypes(indexFilePath: string): Record<string, string> {
   if (!fs.existsSync(indexFilePath)) {
     console.error(`Prisma index file not found at ${indexFilePath}`);
     process.exit(1);
@@ -39,30 +28,57 @@ function parsePrismaModels(indexFilePath: string): Record<string, string> {
     true
   );
 
-  const modelTypes: Record<string, string> = {};
+  const typeMap: Record<string, string> = {};
 
   ts.forEachChild(sourceFile, (node) => {
-    if (ts.isInterfaceDeclaration(node) && node.name) {
-      const modelName = node.name.getText();
-      const members = node.members
+    if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
+      const typeName = node.name.getText();
+      if ("members" in node) {
+        const members = node.members
+          .map((member) => {
+            if (ts.isPropertySignature(member) && member.name) {
+              const memberName = member.name.getText();
+              const memberType = member.type ? member.type.getText() : "any";
+              return `${memberName}: ${memberType}`;
+            }
+            return null;
+          })
+          .filter(Boolean)
+          .join("; ");
+
+        if (members) {
+          typeMap[typeName] = `{ ${members} }`;
+        }
+      }
+    } else if (ts.isEnumDeclaration(node)) {
+      const enumName = node.name.getText();
+      const enumMembers = node.members
         .map((member) => {
-          if (ts.isPropertySignature(member) && member.name) {
-            const memberName = member.name.getText();
-            const memberType = member.type ? member.type.getText() : "any";
-            return `${memberName}: ${memberType}`;
+          if (ts.isEnumMember(member) && member.name) {
+            return member.name.getText();
           }
           return null;
         })
         .filter(Boolean)
-        .join("; ");
+        .join(" | ");
 
-      if (members) {
-        modelTypes[modelName] = `{ ${members} }`;
+      if (enumMembers) {
+        typeMap[enumName] = enumMembers;
       }
     }
   });
 
-  return modelTypes;
+  return typeMap;
+}
+
+// Function to extract return type from function signature
+function extractReturnType(
+  node: ts.FunctionLikeDeclarationBase
+): string | null {
+  if (node.type) {
+    return unwrapPromiseType(node.type.getText());
+  }
+  return null;
 }
 
 // Function to parse files and generate types
@@ -71,7 +87,7 @@ export function parseFilesAndGenerateTypes(
   outputFile: string,
   prismaIndexFile: string
 ) {
-  const modelTypes = parsePrismaModels(prismaIndexFile);
+  const typeMap = parsePrismaTypes(prismaIndexFile);
 
   const serviceDirPath = path.resolve(servicesDirectory);
   const files = fs
@@ -107,7 +123,7 @@ export function parseFilesAndGenerateTypes(
 
             if (returnType) {
               const mappedType = returnType.replace(/(\w+)/g, (match) => {
-                return modelTypes[match] || match;
+                return typeMap[match] || match;
               });
 
               types.push(`type ${functionName}ReturnType = ${mappedType};`);
@@ -128,6 +144,17 @@ export function parseFilesAndGenerateTypes(
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
-  fs.writeFileSync(outputFilePath, types.join("\n"), "utf8");
+  // Add the extracted types from Prisma models and enums at the beginning of the file
+  const typeDeclarations = Object.entries(typeMap).map(
+    ([typeName, typeDefinition]) => {
+      return `type ${typeName} = ${typeDefinition};`;
+    }
+  );
+
+  fs.writeFileSync(
+    outputFilePath,
+    [...typeDeclarations, ...types].join("\n"),
+    "utf8"
+  );
   console.log(`Types file has been generated at ${outputFilePath}.`);
 }
