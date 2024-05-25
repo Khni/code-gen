@@ -1,4 +1,5 @@
 {
   "servicesDirectory": "./src/services",
-  "outputFile": "./types/types.ts"
+  "outputFile": "./types/types.ts",
+  "prismaIndexFile": "./node_modules/.prisma/client/index.d.ts"
 }

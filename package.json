@@ -1,0 +1,20 @@
+{
+  "name": "ts-type-watcher",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "bin": {
+    "ts-type-watcher": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "chokidar": "^3.5.2",
+    "typescript": "^4.3.5",
+    "ts-node": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^14.14.37"
+  }
+}
